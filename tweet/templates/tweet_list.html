@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+
+<h2 class="text-center mt-4">Tweets</h2>
+
+<div class="text-center mb-3">
+
+<a href="/tweet/create/" class="btn-create">Create Tweet</a>
+
+<div class="tweet-grid">
+    {% for tweet in tweets %}
+    <div class="tweet-card">
+        {% if tweet.photo %}
+        <img src="{{ tweet.photo.url }}" alt="">
+        {% endif %}
+
+        <div class="tweet-text">{{ tweet.text }}</div>
+
+        <div class="tweet-info">
+            @{{ tweet.user }} • {{ tweet.created_at }}
+        </div>
+
+        <div>
+            {% if request.user == tweet.user %}
+                <a href="{% url 'edit_tweet' tweet.id %}" class="btn btn-edit">Edit</a>
+                <a href="{% url 'delete_tweet' tweet.id %}" class="btn btn-delete">Delete</a>
+            {% endif %}
+
+            
+        </div>
+
+    </div>
+    {% endfor %}
+</div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,61 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{% static 'css/style.css' %}?v=3">
+    <title>Django Pie</title>
+</head>
+<body>
+
+    <nav class="nav-bar">
+        <div class="nav-brand">
+            Mini Tweet
+        </div>
+
+        <div class="nav-toggle" onclick="document.body.classList.toggle('nav-open')">
+            &#9776;
+        </div>
+
+        <ul class="nav-links">
+            <li><a href="/">Home</a></li>
+            <li><a href="/tweet/">Tweets</a></li>
+            <li><a href="/admin/">Admin</a></li>
+
+            <li class="nav-search">
+                <div class="search-container">
+                    <form method="get" action="{% url 'search' %}">
+                        <input type="text" name="q" placeholder="Search tweets.." required>
+                        <button type="submit">Search</button>
+                    </form>
+                    
+                    {% if user.is_authenticated %}
+                    <form method="post" action="{% url 'logout' %}">
+                        {% csrf_token %}
+                        <button class="btn btn-logout" type="submit">
+                            Logout
+                        </button>
+                    </form>
+                    {% else %}
+                    <a href="{% url 'register' %}"
+                    class="btn-register" type="submit">
+                    Regsiter    
+                    </a>
+                    <a href="{% url 'login' %}"
+                    class="btn-login" type="submit">
+                        Login
+                    </a>
+                    {% endif %}
+                </div>
+            </li>
+        </ul>
+    </nav>
+
+    <div class="main-container">
+        {% block content %}
+        {% endblock %}
+    </div>
+
+</body>
+</html>

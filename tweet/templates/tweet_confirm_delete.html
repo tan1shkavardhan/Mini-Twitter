@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+
+<h2 class="page-title">Delete Tweet</h2>
+
+<div class="delete-container">
+
+    <p class="delete-message">Are you sure you want to delete this tweet?</p>
+
+    <div class="delete-buttons">
+        <form method="post">
+            {% csrf_token %}
+            <button type="submit" class="btn-confirm-delete">Yes, delete</button>
+        </form>
+
+        <a href="{% url 'tweet_list' %}" class="btn-cancel-delete">Cancel</a>
+    </div>
+
+</div>
+
+{% endblock %}

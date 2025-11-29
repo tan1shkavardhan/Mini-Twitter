@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+
+<div class="container mt-4">
+<h1>Welcome to Mini Twitter</h1>
+    {% if user.is_authenticated %}
+
+        <!-- CENTER FEED ONLY -->
+        <div class="row justify-content-center">
+
+            <div class="col-12 col-md-6">
+
+                <!-- COMPOSE BOX -->
+                <div class="tweet-compose d-flex mb-3">
+                    <form action="{% url 'create_tweet' %}" method="POST" class="flex-grow-1 ms-2">
+                        {% csrf_token %}
+                        <textarea class="form-control tweet-input" name="text"
+                            placeholder="What's happening?" required></textarea>
+                        <button class="btn btn-primary tweet-btn mt-2">Tweet</button>
+                    </form>
+                </div>
+
+                <!-- FEED -->
+                {% if tweets %}
+                    {% for tweet in tweets %}
+                    <div class="tweet-card d-flex">
+                        <div class="ms-2">
+                            <div class="fw-bold">{{ tweet.user.username }}</div>
+                            <div>{{ tweet.text }}</div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-center text-muted mt-5">No tweets yet.</p>
+                {% endif %}
+
+            </div>
+
+        </div>
+
+    {% else %}
+
+        <!-- CLEAN PUBLIC HOMEPAGE -->
+        <div class="text-center mt-5">
+            <p class="text-muted mb-4">Log in or register to start sharing your thoughts.</p>
+
+            <a href="{% url 'login' %}" class="btn btn-primary me-2">Login</a>
+            <a href="{% url 'register' %}" class="btn btn-outline-light">Register</a>
+        </div>
+
+    {% endif %}
+
+</div>
+
+{% endblock %}
