@@ -1,1 +1,1 @@
-web: gunicorn djangoho.wsgi:application
+web: gunicorn djangohq.wsgi:application
