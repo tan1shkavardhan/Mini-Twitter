@@ -139,3 +139,18 @@ LOGIN_URL= '/accounts/login'
 
 LOGIN_REDIRECT_URL = '/tweet/'
 LOGOUT_REDIRECT_URL = '/tweet/'
+
+# --- CSRF / SESSION FIX FOR RAILWAY ---
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://web-production-f89e1.up.railway.app",
+]
+
+CSRF_COOKIE_SECURE = False
+SESSION_COOKIE_SECURE = False
+
+CSRF_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SAMESITE = "Lax"
+
+# Trust Railway proxy
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
