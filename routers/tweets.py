@@ -17,11 +17,17 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import Tweet, User
+from app.models import Like, Tweet, User
 from app.schemas import (
-    TweetCreate, TweetResponse,
-    TweetListResponse
+    TweetCreate,
+    TweetListResponse,
+    TweetResponse
 )
+
+
+# ============================================================
+# CONSTANTS
+# ============================================================
 
 MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5 MB
 
@@ -38,24 +44,37 @@ ALLOWED_CONTENT_TYPES = {
     "image/webp"
 }
 
+
+# ============================================================
+# ROUTER
+# ============================================================
+
 router = APIRouter(
     prefix="/tweets",
     tags=["Tweets"]
 )
+
+
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
+
 def save_image(photo: UploadFile) -> str:
     """
     Validate and save an uploaded image.
-    Returns the saved file path.
+
+    Returns:
+        str: Path of the saved image.
     """
 
-    # 1. Check content type
+    # Check Content-Type
     if photo.content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only JPEG, PNG and WebP images are allowed"
         )
 
-    # 2. Check extension
+    # Check file extension
     extension = os.path.splitext(
         photo.filename or ""
     )[1].lower()
@@ -66,7 +85,7 @@ def save_image(photo: UploadFile) -> str:
             detail="Allowed image extensions: .jpg, .jpeg, .png, .webp"
         )
 
-    # 3. Generate a safe filename
+    # Generate a unique filename
     filename = f"{uuid.uuid4()}{extension}"
 
     file_path = os.path.join(
@@ -75,22 +94,21 @@ def save_image(photo: UploadFile) -> str:
     )
 
     try:
-        # 4. Read the file in chunks
         total_size = 0
 
         with open(file_path, "wb") as buffer:
 
             while True:
-                chunk = photo.file.read(1024 * 1024)  # 1 MB
+                # Read 1 MB at a time
+                chunk = photo.file.read(1024 * 1024)
 
                 if not chunk:
                     break
 
                 total_size += len(chunk)
 
-                # 5. Enforce 5 MB limit
+                # Check maximum file size
                 if total_size > MAX_IMAGE_SIZE:
-                    buffer.close()
 
                     if os.path.exists(file_path):
                         os.remove(file_path)
@@ -119,6 +137,55 @@ def save_image(photo: UploadFile) -> str:
 
     return file_path
 
+
+def build_tweet_response(
+    tweet: Tweet,
+    username: str,
+    like_count: int,
+    liked_by_me: bool
+) -> TweetResponse:
+    """
+    Convert a Tweet database object into our API response.
+    """
+
+    return TweetResponse(
+        id=tweet.id,
+        user_id=tweet.user_id,
+        username=username,
+        text=tweet.text,
+        photo=tweet.photo,
+        created_at=tweet.created_at,
+        updated_at=tweet.updated_at,
+        like_count=like_count,
+        liked_by_me=liked_by_me
+    )
+
+
+def get_like_info(
+    tweet_id: int,
+    current_user_id: int,
+    db: Session
+):
+    """
+    Get like count and whether the current user liked the tweet.
+    """
+
+    like_count = db.query(Like).filter(
+        Like.tweet_id == tweet_id
+    ).count()
+
+    liked_by_me = db.query(Like).filter(
+        Like.tweet_id == tweet_id,
+        Like.user_id == current_user_id
+    ).first() is not None
+
+    return like_count, liked_by_me
+
+
+# ============================================================
+# CREATE TWEET
+# ============================================================
+
 @router.post(
     "/",
     response_model=TweetResponse,
@@ -130,10 +197,10 @@ def create_tweet(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Clean whitespace
+    # Remove unnecessary whitespace
     text = text.strip()
 
-    # Validate text
+    # Validate tweet text
     if not text:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -152,7 +219,7 @@ def create_tweet(
     if photo:
         photo_path = save_image(photo)
 
-    # Create database record
+    # Create tweet
     tweet = Tweet(
         text=text,
         photo=photo_path,
@@ -163,8 +230,17 @@ def create_tweet(
     db.commit()
     db.refresh(tweet)
 
-    return tweet
+    return build_tweet_response(
+        tweet=tweet,
+        username=current_user.username,
+        like_count=0,
+        liked_by_me=False
+    )
 
+
+# ============================================================
+# GET ALL TWEETS / FEED
+# ============================================================
 
 @router.get(
     "/",
@@ -180,19 +256,25 @@ def get_tweets(
         ge=1,
         le=50
     ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     # Total number of tweets
     total = db.query(Tweet).count()
 
-    # Calculate how many records to skip
+    # Calculate pagination offset
     offset = (page - 1) * limit
 
-    # Get tweets for this page
+    # Get tweets + usernames
     tweets = (
         db.query(Tweet, User.username)
-        .join(User, Tweet.user_id == User.id)
-        .order_by(Tweet.created_at.desc())
+        .join(
+            User,
+            Tweet.user_id == User.id
+        )
+        .order_by(
+            Tweet.created_at.desc()
+        )
         .offset(offset)
         .limit(limit)
         .all()
@@ -201,15 +283,19 @@ def get_tweets(
     tweet_data = []
 
     for tweet, username in tweets:
+
+        like_count, liked_by_me = get_like_info(
+            tweet_id=tweet.id,
+            current_user_id=current_user.id,
+            db=db
+        )
+
         tweet_data.append(
-            TweetResponse(
-                id=tweet.id,
-                user_id=tweet.user_id,
+            build_tweet_response(
+                tweet=tweet,
                 username=username,
-                text=tweet.text,
-                photo=tweet.photo,
-                created_at=tweet.created_at,
-                updated_at=tweet.updated_at
+                like_count=like_count,
+                liked_by_me=liked_by_me
             )
         )
 
@@ -224,7 +310,14 @@ def get_tweets(
     )
 
 
-#SEARCH TWEET
+# ============================================================
+# SEARCH TWEETS
+# ============================================================
+
+# IMPORTANT:
+# This route must come BEFORE /{tweet_id}
+# otherwise "search" can be interpreted as a tweet_id.
+
 @router.get(
     "/search",
     response_model=TweetListResponse
@@ -244,8 +337,10 @@ def search_tweets(
         ge=1,
         le=50
     ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    # Remove unnecessary whitespace
     search_term = q.strip()
 
     if not search_term:
@@ -256,9 +351,13 @@ def search_tweets(
 
     search_pattern = f"%{search_term}%"
 
+    # Search both tweet text and username
     query = (
         db.query(Tweet, User.username)
-        .join(User, Tweet.user_id == User.id)
+        .join(
+            User,
+            Tweet.user_id == User.id
+        )
         .filter(
             or_(
                 Tweet.text.ilike(search_pattern),
@@ -273,7 +372,9 @@ def search_tweets(
 
     results = (
         query
-        .order_by(Tweet.created_at.desc())
+        .order_by(
+            Tweet.created_at.desc()
+        )
         .offset(offset)
         .limit(limit)
         .all()
@@ -282,15 +383,19 @@ def search_tweets(
     tweet_data = []
 
     for tweet, username in results:
+
+        like_count, liked_by_me = get_like_info(
+            tweet_id=tweet.id,
+            current_user_id=current_user.id,
+            db=db
+        )
+
         tweet_data.append(
-            TweetResponse(
-                id=tweet.id,
-                user_id=tweet.user_id,
+            build_tweet_response(
+                tweet=tweet,
                 username=username,
-                text=tweet.text,
-                photo=tweet.photo,
-                created_at=tweet.created_at,
-                updated_at=tweet.updated_at
+                like_count=like_count,
+                liked_by_me=liked_by_me
             )
         )
 
@@ -305,19 +410,28 @@ def search_tweets(
     )
 
 
+# ============================================================
 # GET ONE TWEET
+# ============================================================
+
 @router.get(
     "/{tweet_id}",
     response_model=TweetResponse
 )
 def get_tweet(
     tweet_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     result = (
         db.query(Tweet, User.username)
-        .join(User, Tweet.user_id == User.id)
-        .filter(Tweet.id == tweet_id)
+        .join(
+            User,
+            Tweet.user_id == User.id
+        )
+        .filter(
+            Tweet.id == tweet_id
+        )
         .first()
     )
 
@@ -329,18 +443,24 @@ def get_tweet(
 
     tweet, username = result
 
-    return TweetResponse(
-        id=tweet.id,
-        user_id=tweet.user_id,
+    like_count, liked_by_me = get_like_info(
+        tweet_id=tweet.id,
+        current_user_id=current_user.id,
+        db=db
+    )
+
+    return build_tweet_response(
+        tweet=tweet,
         username=username,
-        text=tweet.text,
-        photo=tweet.photo,
-        created_at=tweet.created_at,
-        updated_at=tweet.updated_at
+        like_count=like_count,
+        liked_by_me=liked_by_me
     )
 
 
-# EDIT TWEET
+# ============================================================
+# UPDATE TWEET
+# ============================================================
+
 @router.put(
     "/{tweet_id}",
     response_model=TweetResponse
@@ -361,35 +481,50 @@ def update_tweet(
             detail="Tweet not found"
         )
 
+    # Only the owner can edit
     if tweet.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only edit your own tweets"
         )
 
-    tweet.text = tweet_data.text.strip()
+    text = tweet_data.text.strip()
 
-    if not tweet.text:
+    if not text:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tweet cannot be empty"
         )
 
+    if len(text) > 280:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tweet cannot exceed 280 characters"
+        )
+
+    tweet.text = text
+
     db.commit()
     db.refresh(tweet)
 
-    return TweetResponse(
-        id=tweet.id,
-        user_id=tweet.user_id,
+    like_count, liked_by_me = get_like_info(
+        tweet_id=tweet.id,
+        current_user_id=current_user.id,
+        db=db
+    )
+
+    return build_tweet_response(
+        tweet=tweet,
         username=current_user.username,
-        text=tweet.text,
-        photo=tweet.photo,
-        created_at=tweet.created_at,
-        updated_at=tweet.updated_at
+        like_count=like_count,
+        liked_by_me=liked_by_me
     )
 
 
+# ============================================================
 # DELETE TWEET
+# ============================================================
+
 @router.delete(
     "/{tweet_id}",
     status_code=status.HTTP_204_NO_CONTENT
@@ -409,12 +544,14 @@ def delete_tweet(
             detail="Tweet not found"
         )
 
+    # Only the owner can delete
     if tweet.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only delete your own tweets"
         )
 
+    # Delete tweet
     db.delete(tweet)
     db.commit()
 

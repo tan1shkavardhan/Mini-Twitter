@@ -6,6 +6,8 @@ from routers.auth import router as auth_router
 from routers.tweets import router as tweets_router
 from fastapi.staticfiles import StaticFiles
 from routers.users import router as users_router
+from routers.likes import router as likes_router
+
 
 Base.metadata.create_all(bind=engine)
 
@@ -26,7 +28,7 @@ app.mount(
 app.include_router(auth_router)
 app.include_router(tweets_router)
 app.include_router(users_router)
-
+app.include_router(likes_router)
 
 @app.get("/")
 def root():

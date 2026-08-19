@@ -43,6 +43,8 @@ class TweetResponse(BaseModel):
     photo: str | None
     created_at: datetime
     updated_at: datetime
+    like_count: int
+    liked_by_me: bool
 
 class TweetListResponse(BaseModel):
     tweets: list[TweetResponse]
