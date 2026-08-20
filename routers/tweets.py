@@ -1,5 +1,6 @@
 import os
 import uuid
+import io
 
 from fastapi import (
     APIRouter,
@@ -12,24 +13,31 @@ from fastapi import (
     status
 )
 
-from sqlalchemy import or_
+from sqlalchemy import (
+    and_,
+    exists,
+    func,
+    or_
+)
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import Like, Tweet, User
+from app.models import Comment, Like, Tweet, User
 from app.schemas import (
     TweetCreate,
     TweetListResponse,
     TweetResponse
 )
 
+from PIL import Image, UnidentifiedImageError
+
 
 # ============================================================
 # CONSTANTS
 # ============================================================
 
-MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5 MB
+MAX_IMAGE_SIZE = 5 * 1024 * 1024
 
 ALLOWED_EXTENSIONS = {
     ".jpg",
@@ -56,25 +64,27 @@ router = APIRouter(
 
 
 # ============================================================
-# HELPER FUNCTIONS
+# IMAGE HANDLING
 # ============================================================
-
 def save_image(photo: UploadFile) -> str:
     """
-    Validate and save an uploaded image.
-
-    Returns:
-        str: Path of the saved image.
+    Validate and safely save an uploaded image.
     """
 
-    # Check Content-Type
+    # --------------------------------------------------------
+    # CONTENT TYPE
+    # --------------------------------------------------------
+
     if photo.content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only JPEG, PNG and WebP images are allowed"
         )
 
-    # Check file extension
+    # --------------------------------------------------------
+    # FILE EXTENSION
+    # --------------------------------------------------------
+
     extension = os.path.splitext(
         photo.filename or ""
     )[1].lower()
@@ -85,7 +95,102 @@ def save_image(photo: UploadFile) -> str:
             detail="Allowed image extensions: .jpg, .jpeg, .png, .webp"
         )
 
-    # Generate a unique filename
+    # --------------------------------------------------------
+    # READ FILE
+    # --------------------------------------------------------
+
+    try:
+
+        total_size = 0
+        file_data = bytearray()
+
+        while True:
+
+            chunk = photo.file.read(
+                1024 * 1024
+            )
+
+            if not chunk:
+                break
+
+            total_size += len(chunk)
+
+            # Maximum size check
+            if total_size > MAX_IMAGE_SIZE:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="Image size cannot exceed 5 MB"
+                )
+
+            file_data.extend(chunk)
+
+        # Empty file
+        if total_size == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Uploaded image cannot be empty"
+            )
+
+    finally:
+        photo.file.close()
+
+    # --------------------------------------------------------
+    # ACTUAL IMAGE VALIDATION
+    # --------------------------------------------------------
+
+    try:
+
+        image = Image.open(
+            io.BytesIO(file_data)
+        )
+
+        # Verify actual image structure
+        image.verify()
+
+    except (
+        UnidentifiedImageError,
+        OSError,
+        SyntaxError
+    ):
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is not a valid image"
+        )
+
+    # --------------------------------------------------------
+    # VERIFY IMAGE FORMAT
+    # --------------------------------------------------------
+
+    format_to_content_type = {
+        "JPEG": "image/jpeg",
+        "PNG": "image/png",
+        "WEBP": "image/webp"
+    }
+
+    detected_content_type = format_to_content_type.get(
+        image.format
+    )
+
+    if detected_content_type != photo.content_type:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File content does not match its declared type"
+        )
+
+    # --------------------------------------------------------
+    # CREATE SAFE UPLOAD DIRECTORY
+    # --------------------------------------------------------
+
+    os.makedirs(
+        "uploads",
+        exist_ok=True
+    )
+
+    # --------------------------------------------------------
+    # GENERATE SAFE FILENAME
+    # --------------------------------------------------------
+
     filename = f"{uuid.uuid4()}{extension}"
 
     file_path = os.path.join(
@@ -93,37 +198,21 @@ def save_image(photo: UploadFile) -> str:
         filename
     )
 
+    # --------------------------------------------------------
+    # SAVE FILE
+    # --------------------------------------------------------
+
     try:
-        total_size = 0
 
-        with open(file_path, "wb") as buffer:
+        with open(
+            file_path,
+            "wb"
+        ) as buffer:
 
-            while True:
-                # Read 1 MB at a time
-                chunk = photo.file.read(1024 * 1024)
-
-                if not chunk:
-                    break
-
-                total_size += len(chunk)
-
-                # Check maximum file size
-                if total_size > MAX_IMAGE_SIZE:
-
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-
-                    raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail="Image size cannot exceed 5 MB"
-                    )
-
-                buffer.write(chunk)
-
-    except HTTPException:
-        raise
+            buffer.write(file_data)
 
     except Exception:
+
         if os.path.exists(file_path):
             os.remove(file_path)
 
@@ -132,21 +221,19 @@ def save_image(photo: UploadFile) -> str:
             detail="Failed to save image"
         )
 
-    finally:
-        photo.file.close()
-
     return file_path
 
+# ============================================================
+# TWEET RESPONSE BUILDER
+# ============================================================
 
 def build_tweet_response(
     tweet: Tweet,
     username: str,
     like_count: int,
-    liked_by_me: bool
+    liked_by_me: bool,
+    comment_count: int
 ) -> TweetResponse:
-    """
-    Convert a Tweet database object into our API response.
-    """
 
     return TweetResponse(
         id=tweet.id,
@@ -157,29 +244,115 @@ def build_tweet_response(
         created_at=tweet.created_at,
         updated_at=tweet.updated_at,
         like_count=like_count,
-        liked_by_me=liked_by_me
+        liked_by_me=liked_by_me,
+        comment_count=comment_count
     )
 
 
-def get_like_info(
-    tweet_id: int,
-    current_user_id: int,
-    db: Session
+# ============================================================
+# OPTIMIZED QUERY BUILDER
+# ============================================================
+
+def get_tweet_query(
+    db: Session,
+    current_user_id: int
 ):
     """
-    Get like count and whether the current user liked the tweet.
+    Build an optimized tweet query.
+
+    Instead of querying likes/comments separately
+    for every tweet, calculate everything inside
+    the main SQL query.
     """
 
-    like_count = db.query(Like).filter(
-        Like.tweet_id == tweet_id
-    ).count()
+    like_count_subquery = (
+        db.query(
+            Like.tweet_id,
+            func.count(Like.id).label("like_count")
+        )
+        .group_by(
+            Like.tweet_id
+        )
+        .subquery()
+    )
 
-    liked_by_me = db.query(Like).filter(
-        Like.tweet_id == tweet_id,
-        Like.user_id == current_user_id
-    ).first() is not None
+    comment_count_subquery = (
+        db.query(
+            Comment.tweet_id,
+            func.count(Comment.id).label("comment_count")
+        )
+        .group_by(
+            Comment.tweet_id
+        )
+        .subquery()
+    )
 
-    return like_count, liked_by_me
+    liked_by_me_subquery = exists().where(
+        and_(
+            Like.tweet_id == Tweet.id,
+            Like.user_id == current_user_id
+        )
+    )
+
+    query = (
+        db.query(
+            Tweet,
+            User.username,
+
+            func.coalesce(
+                like_count_subquery.c.like_count,
+                0
+            ).label("like_count"),
+
+            func.coalesce(
+                comment_count_subquery.c.comment_count,
+                0
+            ).label("comment_count"),
+
+            liked_by_me_subquery.label(
+                "liked_by_me"
+            )
+        )
+        .join(
+            User,
+            Tweet.user_id == User.id
+        )
+        .outerjoin(
+            like_count_subquery,
+            like_count_subquery.c.tweet_id == Tweet.id
+        )
+        .outerjoin(
+            comment_count_subquery,
+            comment_count_subquery.c.tweet_id == Tweet.id
+        )
+    )
+
+    return query
+
+
+# ============================================================
+# CONVERT QUERY RESULT
+# ============================================================
+
+def make_tweet_response(
+    result
+) -> TweetResponse:
+
+    (
+        tweet,
+        username,
+        like_count,
+        comment_count,
+        liked_by_me
+    ) = result
+
+    return build_tweet_response(
+        tweet=tweet,
+        username=username,
+        like_count=like_count,
+        liked_by_me=bool(liked_by_me),
+        comment_count=comment_count
+    )
 
 
 # ============================================================
@@ -197,10 +370,9 @@ def create_tweet(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Remove unnecessary whitespace
+
     text = text.strip()
 
-    # Validate tweet text
     if not text:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -213,13 +385,11 @@ def create_tweet(
             detail="Tweet cannot exceed 280 characters"
         )
 
-    # Handle optional image
     photo_path = None
 
     if photo:
         photo_path = save_image(photo)
 
-    # Create tweet
     tweet = Tweet(
         text=text,
         photo=photo_path,
@@ -234,12 +404,13 @@ def create_tweet(
         tweet=tweet,
         username=current_user.username,
         like_count=0,
-        liked_by_me=False
+        liked_by_me=False,
+        comment_count=0
     )
 
 
 # ============================================================
-# GET ALL TWEETS / FEED
+# GET ALL TWEETS
 # ============================================================
 
 @router.get(
@@ -247,31 +418,23 @@ def create_tweet(
     response_model=TweetListResponse
 )
 def get_tweets(
-    page: int = Query(
-        default=1,
-        ge=1
-    ),
-    limit: int = Query(
-        default=10,
-        ge=1,
-        le=50
-    ),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=10, ge=1, le=50),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Total number of tweets
-    total = db.query(Tweet).count()
 
-    # Calculate pagination offset
+    query = get_tweet_query(
+        db,
+        current_user.id
+    )
+
+    total = query.count()
+
     offset = (page - 1) * limit
 
-    # Get tweets + usernames
-    tweets = (
-        db.query(Tweet, User.username)
-        .join(
-            User,
-            Tweet.user_id == User.id
-        )
+    results = (
+        query
         .order_by(
             Tweet.created_at.desc()
         )
@@ -280,33 +443,17 @@ def get_tweets(
         .all()
     )
 
-    tweet_data = []
-
-    for tweet, username in tweets:
-
-        like_count, liked_by_me = get_like_info(
-            tweet_id=tweet.id,
-            current_user_id=current_user.id,
-            db=db
-        )
-
-        tweet_data.append(
-            build_tweet_response(
-                tweet=tweet,
-                username=username,
-                like_count=like_count,
-                liked_by_me=liked_by_me
-            )
-        )
-
-    has_next = (page * limit) < total
+    tweet_data = [
+        make_tweet_response(result)
+        for result in results
+    ]
 
     return TweetListResponse(
         tweets=tweet_data,
         page=page,
         limit=limit,
         total=total,
-        has_next=has_next
+        has_next=(page * limit) < total
     )
 
 
@@ -314,33 +461,18 @@ def get_tweets(
 # SEARCH TWEETS
 # ============================================================
 
-# IMPORTANT:
-# This route must come BEFORE /{tweet_id}
-# otherwise "search" can be interpreted as a tweet_id.
-
 @router.get(
     "/search",
     response_model=TweetListResponse
 )
 def search_tweets(
-    q: str = Query(
-        ...,
-        min_length=1,
-        max_length=100
-    ),
-    page: int = Query(
-        default=1,
-        ge=1
-    ),
-    limit: int = Query(
-        default=10,
-        ge=1,
-        le=50
-    ),
+    q: str = Query(..., min_length=1, max_length=100),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=10, ge=1, le=50),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Remove unnecessary whitespace
+
     search_term = q.strip()
 
     if not search_term:
@@ -351,18 +483,13 @@ def search_tweets(
 
     search_pattern = f"%{search_term}%"
 
-    # Search both tweet text and username
-    query = (
-        db.query(Tweet, User.username)
-        .join(
-            User,
-            Tweet.user_id == User.id
-        )
-        .filter(
-            or_(
-                Tweet.text.ilike(search_pattern),
-                User.username.ilike(search_pattern)
-            )
+    query = get_tweet_query(
+        db,
+        current_user.id
+    ).filter(
+        or_(
+            Tweet.text.ilike(search_pattern),
+            User.username.ilike(search_pattern)
         )
     )
 
@@ -380,33 +507,17 @@ def search_tweets(
         .all()
     )
 
-    tweet_data = []
-
-    for tweet, username in results:
-
-        like_count, liked_by_me = get_like_info(
-            tweet_id=tweet.id,
-            current_user_id=current_user.id,
-            db=db
-        )
-
-        tweet_data.append(
-            build_tweet_response(
-                tweet=tweet,
-                username=username,
-                like_count=like_count,
-                liked_by_me=liked_by_me
-            )
-        )
-
-    has_next = (page * limit) < total
+    tweet_data = [
+        make_tweet_response(result)
+        for result in results
+    ]
 
     return TweetListResponse(
         tweets=tweet_data,
         page=page,
         limit=limit,
         total=total,
-        has_next=has_next
+        has_next=(page * limit) < total
     )
 
 
@@ -423,17 +534,15 @@ def get_tweet(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    result = (
-        db.query(Tweet, User.username)
-        .join(
-            User,
-            Tweet.user_id == User.id
-        )
-        .filter(
-            Tweet.id == tweet_id
-        )
-        .first()
+
+    query = get_tweet_query(
+        db,
+        current_user.id
+    ).filter(
+        Tweet.id == tweet_id
     )
+
+    result = query.first()
 
     if not result:
         raise HTTPException(
@@ -441,20 +550,7 @@ def get_tweet(
             detail="Tweet not found"
         )
 
-    tweet, username = result
-
-    like_count, liked_by_me = get_like_info(
-        tweet_id=tweet.id,
-        current_user_id=current_user.id,
-        db=db
-    )
-
-    return build_tweet_response(
-        tweet=tweet,
-        username=username,
-        like_count=like_count,
-        liked_by_me=liked_by_me
-    )
+    return make_tweet_response(result)
 
 
 # ============================================================
@@ -471,6 +567,7 @@ def update_tweet(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+
     tweet = db.query(Tweet).filter(
         Tweet.id == tweet_id
     ).first()
@@ -481,7 +578,6 @@ def update_tweet(
             detail="Tweet not found"
         )
 
-    # Only the owner can edit
     if tweet.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -507,18 +603,16 @@ def update_tweet(
     db.commit()
     db.refresh(tweet)
 
-    like_count, liked_by_me = get_like_info(
-        tweet_id=tweet.id,
-        current_user_id=current_user.id,
-        db=db
+    query = get_tweet_query(
+        db,
+        current_user.id
+    ).filter(
+        Tweet.id == tweet.id
     )
 
-    return build_tweet_response(
-        tweet=tweet,
-        username=current_user.username,
-        like_count=like_count,
-        liked_by_me=liked_by_me
-    )
+    result = query.first()
+
+    return make_tweet_response(result)
 
 
 # ============================================================
@@ -534,6 +628,7 @@ def delete_tweet(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+
     tweet = db.query(Tweet).filter(
         Tweet.id == tweet_id
     ).first()
@@ -544,14 +639,12 @@ def delete_tweet(
             detail="Tweet not found"
         )
 
-    # Only the owner can delete
     if tweet.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only delete your own tweets"
         )
 
-    # Delete tweet
     db.delete(tweet)
     db.commit()
 

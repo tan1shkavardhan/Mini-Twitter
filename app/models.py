@@ -14,10 +14,18 @@ from sqlalchemy.orm import relationship
 from .database import Base
 
 
+# ============================================================
+# USER
+# ============================================================
+
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
 
     username = Column(
         String(50),
@@ -53,8 +61,34 @@ class User(Base):
         "Like",
         back_populates="user",
         cascade="all, delete-orphan"
-)
+    )
 
+    comments = relationship(
+        "Comment",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+
+    # Users this user follows
+    following = relationship(
+        "Follow",
+        foreign_keys="Follow.follower_id",
+        back_populates="follower",
+        cascade="all, delete-orphan"
+    )
+
+    # Users following this user
+    followers = relationship(
+        "Follow",
+        foreign_keys="Follow.following_id",
+        back_populates="following",
+        cascade="all, delete-orphan"
+    )
+
+
+# ============================================================
+# TWEET
+# ============================================================
 
 class Tweet(Base):
     __tablename__ = "tweets"
@@ -68,7 +102,8 @@ class Tweet(Base):
     user_id = Column(
         Integer,
         ForeignKey("users.id"),
-        nullable=False
+        nullable=False,
+        index=True
     )
 
     text = Column(
@@ -83,7 +118,8 @@ class Tweet(Base):
 
     created_at = Column(
         DateTime,
-        default=lambda: datetime.now(timezone.utc)
+        default=lambda: datetime.now(timezone.utc),
+        index=True
     )
 
     updated_at = Column(
@@ -103,6 +139,16 @@ class Tweet(Base):
         cascade="all, delete-orphan"
     )
 
+    comments = relationship(
+        "Comment",
+        back_populates="tweet",
+        cascade="all, delete-orphan"
+    )
+
+
+# ============================================================
+# LIKE
+# ============================================================
 
 class Like(Base):
     __tablename__ = "likes"
@@ -111,7 +157,7 @@ class Like(Base):
         UniqueConstraint(
             "user_id",
             "tweet_id",
-            name ="unique_user_tweet_like"
+            name="unique_user_tweet_like"
         ),
     )
 
@@ -124,13 +170,15 @@ class Like(Base):
     user_id = Column(
         Integer,
         ForeignKey("users.id"),
-        nullable=False
+        nullable=False,
+        index=True
     )
 
     tweet_id = Column(
         Integer,
         ForeignKey("tweets.id"),
-        nullable=False
+        nullable=False,
+        index=True
     )
 
     created_at = Column(
@@ -146,4 +194,111 @@ class Like(Base):
     tweet = relationship(
         "Tweet",
         back_populates="likes"
+    )
+
+
+# ============================================================
+# COMMENT
+# ============================================================
+
+class Comment(Base):
+    __tablename__ = "comments"
+
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True
+    )
+
+    tweet_id = Column(
+        Integer,
+        ForeignKey("tweets.id"),
+        nullable=False,
+        index=True
+    )
+
+    text = Column(
+        Text,
+        nullable=False
+    )
+
+    created_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc)
+    )
+
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc)
+    )
+
+    user = relationship(
+        "User",
+        back_populates="comments"
+    )
+
+    tweet = relationship(
+        "Tweet",
+        back_populates="comments"
+    )
+
+
+# ============================================================
+# FOLLOW
+# ============================================================
+
+class Follow(Base):
+    __tablename__ = "follows"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "follower_id",
+            "following_id",
+            name="unique_follower_following"
+        ),
+    )
+
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    follower_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True
+    )
+
+    following_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True
+    )
+
+    created_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc)
+    )
+
+    follower = relationship(
+        "User",
+        foreign_keys=[follower_id],
+        back_populates="following"
+    )
+
+    following = relationship(
+        "User",
+        foreign_keys=[following_id],
+        back_populates="followers"
     )

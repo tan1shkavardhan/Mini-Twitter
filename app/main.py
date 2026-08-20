@@ -1,15 +1,14 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
-from . import models
-from .database import Base, engine
 from routers.auth import router as auth_router
 from routers.tweets import router as tweets_router
-from fastapi.staticfiles import StaticFiles
 from routers.users import router as users_router
 from routers.likes import router as likes_router
-
-
-Base.metadata.create_all(bind=engine)
+from routers.comments import router as comments_router
+from routers.follows import router as follows_router
+from routers.feed import router as feed_router
+from fastapi.middleware.cors import CORSMiddleware
 
 
 app = FastAPI(
@@ -18,6 +17,21 @@ app = FastAPI(
     version="2.0.0"
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ============================================================
+# STATIC FILES
+# ============================================================
+
 app.mount(
     "/uploads",
     StaticFiles(directory="uploads"),
@@ -25,10 +39,22 @@ app.mount(
 )
 
 
+# ============================================================
+# ROUTERS
+# ============================================================
+
 app.include_router(auth_router)
 app.include_router(tweets_router)
 app.include_router(users_router)
 app.include_router(likes_router)
+app.include_router(comments_router)
+app.include_router(follows_router)
+app.include_router(feed_router)
+
+
+# ============================================================
+# ROOT
+# ============================================================
 
 @app.get("/")
 def root():

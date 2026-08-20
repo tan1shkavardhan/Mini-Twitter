@@ -45,6 +45,7 @@ class TweetResponse(BaseModel):
     updated_at: datetime
     like_count: int
     liked_by_me: bool
+    comment_count: int
 
 class TweetListResponse(BaseModel):
     tweets: list[TweetResponse]
@@ -69,10 +70,46 @@ class UserProfileResponse(BaseModel):
     email: str
     created_at: datetime
     tweet_count: int
+    followers_count: int
+    following_count: int
+    following: bool
 
 class UserTweetsResponse(BaseModel):
     username: str
     tweets: list[TweetResponse]
+    page: int
+    limit: int
+    total: int
+    has_next: bool
+
+
+# ============================================================
+# COMMENTS
+# ============================================================
+
+class CommentCreate(BaseModel):
+    text: str = Field(
+        min_length=1,
+        max_length=500
+    )
+
+
+class CommentResponse(BaseModel):
+    id: int
+    user_id: int
+    username: str
+    tweet_id: int
+    text: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(
+        from_attributes=True
+    )
+
+
+class CommentListResponse(BaseModel):
+    comments: list[CommentResponse]
     page: int
     limit: int
     total: int
