@@ -237,3 +237,65 @@ def test_unfollow_when_not_following(client):
     )
 
     assert response.status_code == 404
+
+def test_follow_state_after_unfollow(client):
+
+    follower_token = create_user(
+        client,
+        "statefollower",
+        "statefollower@example.com"
+    )
+
+    create_user(
+        client,
+        "statetarget",
+        "statetarget@example.com"
+    )
+
+    # Follow
+    follow_response = client.post(
+        "/users/statetarget/follow",
+        headers={
+            "Authorization": f"Bearer {follower_token}"
+        }
+    )
+
+    assert follow_response.status_code == 201
+
+    # Check profile
+    profile_response = client.get(
+        "/users/statetarget",
+        headers={
+            "Authorization": f"Bearer {follower_token}"
+        }
+    )
+
+    assert profile_response.status_code == 200
+
+    profile = profile_response.json()
+
+    assert profile["following"] is True
+
+    # Unfollow
+    unfollow_response = client.delete(
+        "/users/statetarget/follow",
+        headers={
+            "Authorization": f"Bearer {follower_token}"
+        }
+    )
+
+    assert unfollow_response.status_code == 200
+
+    # Check profile again
+    profile_response = client.get(
+        "/users/statetarget",
+        headers={
+            "Authorization": f"Bearer {follower_token}"
+        }
+    )
+
+    assert profile_response.status_code == 200
+
+    profile = profile_response.json()
+
+    assert profile["following"] is False

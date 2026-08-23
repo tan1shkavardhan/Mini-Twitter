@@ -118,7 +118,7 @@ def save_image(photo: UploadFile) -> str:
             # Maximum size check
             if total_size > MAX_IMAGE_SIZE:
                 raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                     detail="Image size cannot exceed 5 MB"
                 )
 

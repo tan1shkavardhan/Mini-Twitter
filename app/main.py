@@ -1,14 +1,15 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.settings import settings
 from routers.auth import router as auth_router
+from routers.comments import router as comments_router
+from routers.feed import router as feed_router
+from routers.follows import router as follows_router
+from routers.likes import router as likes_router
 from routers.tweets import router as tweets_router
 from routers.users import router as users_router
-from routers.likes import router as likes_router
-from routers.comments import router as comments_router
-from routers.follows import router as follows_router
-from routers.feed import router as feed_router
-from fastapi.middleware.cors import CORSMiddleware
 
 
 app = FastAPI(
@@ -17,16 +18,15 @@ app = FastAPI(
     version="2.0.0"
 )
 
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173"
-    ],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # ============================================================
 # STATIC FILES

@@ -3,38 +3,22 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import Follow, Like, Tweet, User
+from app.models import Follow, Tweet, User
 from app.schemas import (
-    TweetResponse,
     UserProfileResponse,
     UserTweetsResponse
 )
 
+from routers.tweets import (
+    get_tweet_query,
+    make_tweet_response
+)
 
 
 router = APIRouter(
     prefix="/users",
     tags=["Users"]
 )
-
-
-def build_user_tweet_response(
-    tweet: Tweet,
-    username: str,
-    like_count: int,
-    liked_by_me: bool
-) -> TweetResponse:
-    return TweetResponse(
-        id=tweet.id,
-        user_id=tweet.user_id,
-        username=username,
-        text=tweet.text,
-        photo=tweet.photo,
-        created_at=tweet.created_at,
-        updated_at=tweet.updated_at,
-        like_count=like_count,
-        liked_by_me=liked_by_me
-    )
 
 
 # ============================================================
@@ -60,22 +44,18 @@ def get_user_profile(
             detail="User not found"
         )
 
-    # Number of tweets
     tweet_count = db.query(Tweet).filter(
         Tweet.user_id == user.id
     ).count()
 
-    # Number of followers
     followers_count = db.query(Follow).filter(
         Follow.following_id == user.id
     ).count()
 
-    # Number of people this user follows
     following_count = db.query(Follow).filter(
         Follow.follower_id == user.id
     ).count()
 
-    # Is the current user following this profile?
     following = db.query(Follow).filter(
         Follow.follower_id == current_user.id,
         Follow.following_id == user.id
@@ -91,6 +71,7 @@ def get_user_profile(
         following_count=following_count,
         following=following
     )
+
 
 # ============================================================
 # GET USER'S TWEETS
@@ -124,17 +105,22 @@ def get_user_tweets(
             detail="User not found"
         )
 
-    total = db.query(Tweet).filter(
-        Tweet.user_id == user.id
-    ).count()
-
-    offset = (page - 1) * limit
-
-    tweets = (
-        db.query(Tweet)
+    query = (
+        get_tweet_query(
+            db,
+            current_user.id
+        )
         .filter(
             Tweet.user_id == user.id
         )
+    )
+
+    total = query.count()
+
+    offset = (page - 1) * limit
+
+    results = (
+        query
         .order_by(
             Tweet.created_at.desc()
         )
@@ -143,27 +129,10 @@ def get_user_tweets(
         .all()
     )
 
-    tweet_data = []
-
-    for tweet in tweets:
-
-        like_count = db.query(Like).filter(
-            Like.tweet_id == tweet.id
-        ).count()
-
-        liked_by_me = db.query(Like).filter(
-            Like.tweet_id == tweet.id,
-            Like.user_id == current_user.id
-        ).first() is not None
-
-        tweet_data.append(
-            build_user_tweet_response(
-                tweet=tweet,
-                username=user.username,
-                like_count=like_count,
-                liked_by_me=liked_by_me
-            )
-        )
+    tweet_data = [
+        make_tweet_response(result)
+        for result in results
+    ]
 
     has_next = (page * limit) < total
 

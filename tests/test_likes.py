@@ -177,4 +177,46 @@ def test_unlike_tweet(client):
 
     assert data["like_count"] == 0
     assert data["liked_by_me"] is False
-    
+
+
+def test_user_cannot_unlike_another_users_like(client):
+
+    owner_token = create_user(
+        client,
+        "likeowner",
+        "likeowner@example.com"
+    )
+
+    attacker_token = create_user(
+        client,
+        "likeattacker",
+        "likeattacker@example.com"
+    )
+
+    tweet_id = create_tweet(
+        client,
+        owner_token,
+        "Authorization like test"
+    )
+
+    # Owner likes the tweet
+    like_response = client.post(
+        f"/tweets/{tweet_id}/like",
+        headers={
+            "Authorization": f"Bearer {owner_token}"
+        }
+    )
+
+    assert like_response.status_code in [200, 201]
+
+    # Attacker tries to unlike
+    unlike_response = client.delete(
+        f"/tweets/{tweet_id}/like",
+        headers={
+            "Authorization": f"Bearer {attacker_token}"
+        }
+    )
+
+    # Depending on your implementation, this should
+    # indicate that the attacker has no like to remove.
+    assert unlike_response.status_code == 404

@@ -23,6 +23,29 @@ router = APIRouter(
 )
 
 
+# ============================================================
+# HELPERS
+# ============================================================
+
+def build_comment_response(
+    comment: Comment,
+    username: str
+) -> CommentResponse:
+    return CommentResponse(
+        id=comment.id,
+        user_id=comment.user_id,
+        username=username,
+        tweet_id=comment.tweet_id,
+        text=comment.text,
+        created_at=comment.created_at,
+        updated_at=comment.updated_at
+    )
+
+
+# ============================================================
+# CREATE COMMENT
+# ============================================================
+
 @router.post(
     "/tweets/{tweet_id}/comments",
     response_model=CommentResponse,
@@ -62,16 +85,15 @@ def create_comment(
     db.commit()
     db.refresh(comment)
 
-    return CommentResponse(
-        id=comment.id,
-        user_id=comment.user_id,
-        username=current_user.username,
-        tweet_id=comment.tweet_id,
-        text=comment.text,
-        created_at=comment.created_at,
-        updated_at=comment.updated_at
+    return build_comment_response(
+        comment,
+        current_user.username
     )
 
+
+# ============================================================
+# GET COMMENTS
+# ============================================================
 
 @router.get(
     "/tweets/{tweet_id}/comments",
@@ -109,20 +131,13 @@ def get_comments(
         .all()
     )
 
-    comments = []
-
-    for comment, username in results:
-        comments.append(
-            CommentResponse(
-                id=comment.id,
-                user_id=comment.user_id,
-                username=username,
-                tweet_id=comment.tweet_id,
-                text=comment.text,
-                created_at=comment.created_at,
-                updated_at=comment.updated_at
-            )
+    comments = [
+        build_comment_response(
+            comment,
+            username
         )
+        for comment, username in results
+    ]
 
     has_next = (page * limit) < total
 
@@ -134,6 +149,10 @@ def get_comments(
         has_next=has_next
     )
 
+
+# ============================================================
+# UPDATE COMMENT
+# ============================================================
 
 @router.put(
     "/comments/{comment_id}",
@@ -174,16 +193,15 @@ def update_comment(
     db.commit()
     db.refresh(comment)
 
-    return CommentResponse(
-        id=comment.id,
-        user_id=comment.user_id,
-        username=current_user.username,
-        tweet_id=comment.tweet_id,
-        text=comment.text,
-        created_at=comment.created_at,
-        updated_at=comment.updated_at
+    return build_comment_response(
+        comment,
+        current_user.username
     )
 
+
+# ============================================================
+# DELETE COMMENT
+# ============================================================
 
 @router.delete(
     "/comments/{comment_id}",

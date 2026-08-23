@@ -3,7 +3,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import jwt
 from sqlalchemy.orm import Session
 
-from .auth import SECRET_KEY, ALGORITHM
+from .settings import settings
 from .database import get_db
 from .models import User
 
@@ -20,13 +20,21 @@ def get_current_user(
     try:
         payload = jwt.decode(
             token,
-            SECRET_KEY,
-            algorithms=[ALGORITHM]
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM]
         )
 
-        username = payload.get("sub")
+        user_id = payload.get("sub")
 
-        if username is None:
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token"
+            )
+
+        try:
+            user_id = int(user_id)
+        except (TypeError, ValueError):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token"
@@ -39,7 +47,7 @@ def get_current_user(
         )
 
     user = db.query(User).filter(
-        User.username == username
+        User.id == user_id
     ).first()
 
     if user is None:

@@ -1,3 +1,10 @@
+from datetime import datetime, timedelta, timezone
+
+import jwt
+
+from app.settings import settings
+
+
 def test_register_user(client):
 
     response = client.post(
@@ -17,6 +24,7 @@ def test_register_user(client):
     assert data["username"] == "testuser"
     assert data["email"] == "test@example.com"
     assert "created_at" in data
+
 
 def test_duplicate_username(client):
 
@@ -47,7 +55,6 @@ def test_duplicate_username(client):
 
 def test_login(client):
 
-    # Register user first
     register_response = client.post(
         "/auth/register",
         json={
@@ -59,7 +66,6 @@ def test_login(client):
 
     assert register_response.status_code == 201
 
-    # Login
     login_response = client.post(
         "/auth/login",
         json={
@@ -74,6 +80,7 @@ def test_login(client):
 
     assert "access_token" in data
     assert data["token_type"] == "bearer"
+
 
 def test_login_wrong_password(client):
 
@@ -95,3 +102,95 @@ def test_login_wrong_password(client):
     )
 
     assert response.status_code in [400, 401]
+
+
+def test_missing_token(client):
+
+    response = client.get(
+        "/auth/me"
+    )
+
+    assert response.status_code == 401
+
+
+def test_invalid_token(client):
+
+    response = client.get(
+        "/auth/me",
+        headers={
+            "Authorization": "Bearer definitely-not-a-real-token"
+        }
+    )
+
+    assert response.status_code == 401
+
+
+def test_malformed_authorization_header(client):
+
+    response = client.get(
+        "/auth/me",
+        headers={
+            "Authorization": "NotBearer token"
+        }
+    )
+
+    assert response.status_code == 401
+
+
+def test_unknown_user_token(client):
+
+    token = jwt.encode(
+        {
+            "sub": "999999999",
+        },
+        settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM
+    )
+
+    response = client.get(
+        "/auth/me",
+        headers={
+            "Authorization": f"Bearer {token}"
+        }
+    )
+
+    assert response.status_code == 401
+
+
+def test_expired_token(client):
+
+    token = jwt.encode(
+        {
+            "sub": "1",
+            "exp": datetime.now(timezone.utc) - timedelta(
+                minutes=5
+            )
+        },
+        settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM
+    )
+
+    response = client.get(
+        "/auth/me",
+        headers={
+            "Authorization": f"Bearer {token}"
+        }
+    )
+
+    assert response.status_code == 401
+
+
+def test_protected_endpoints_require_auth(client):
+
+    protected_endpoints = [
+        ("/auth/me", "get"),
+        ("/tweets/", "get"),
+        ("/feed/", "get"),
+    ]
+
+    for path, method in protected_endpoints:
+
+        if method == "get":
+            response = client.get(path)
+
+        assert response.status_code == 401
