@@ -1,0 +1,150 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background-color: #f5f7fa;
+  color: #1f2937;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+}
+
+/* Sidebar */
+
+.sidebar {
+  width: 250px;
+  min-height: 100vh;
+  padding: 24px;
+  background: white;
+  border-right: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+}
+
+.logo {
+  margin: 0 0 40px;
+  font-size: 24px;
+}
+
+.sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebar nav button {
+  border: none;
+  background: transparent;
+  padding: 12px;
+  text-align: left;
+  border-radius: 8px;
+  font-size: 16px;
+}
+
+.sidebar nav button:hover,
+.sidebar nav button.active {
+  background: #e8f0fe;
+}
+
+.logout {
+  margin-top: auto;
+  border: none;
+  padding: 12px;
+  border-radius: 8px;
+  background: #ef4444;
+  color: white;
+}
+
+/* Feed */
+
+.feed {
+  width: 100%;
+  max-width: 700px;
+  padding: 30px;
+}
+
+.feed header {
+  margin-bottom: 20px;
+}
+
+/* Create tweet */
+
+.create-tweet {
+  background: white;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 20px;
+}
+
+.create-tweet textarea {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.create-tweet button {
+  margin-top: 10px;
+  float: right;
+  border: none;
+  background: #2563eb;
+  color: white;
+  padding: 9px 18px;
+  border-radius: 20px;
+}
+
+/* Tweet */
+
+.tweet {
+  background: white;
+  border: 1px solid #e5e7eb;
+  padding: 18px;
+  border-radius: 12px;
+  margin-bottom: 15px;
+}
+
+.tweet-header {
+  display: flex;
+  gap: 8px;
+}
+
+.tweet-header span {
+  color: #6b7280;
+}
+
+.tweet p {
+  line-height: 1.5;
+}
+
+.tweet-actions {
+  display: flex;
+  gap: 20px;
+}
+
+.tweet-actions button {
+  border: none;
+  background: transparent;
+}
+
+/* Placeholder */
+
+.placeholder {
+  background: white;
+  padding: 30px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+}

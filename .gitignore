@@ -1,23 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # Virtual environments
 env/
 venv/
-
-# Python cache
-__pycache__/
-*.py[cod]
+.venv/
 
 # Environment variables
 .env
 
-# SQLite databases
+# Databases
 *.db
 
-# Uploaded files
+# Uploads
 uploads/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# OS
+.DS_Store
 
 # IDE
 .vscode/
-
-# OS files
-.DS_Store
-Thumbs.db
+.idea/
