@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import Follow, User
+from app.notification_utils import create_notification
 
 
 router = APIRouter(
@@ -66,6 +67,14 @@ def follow_user(
     )
 
     db.add(follow)
+
+    create_notification(
+        db=db,
+        user_id=user_to_follow.id,
+        actor_id=current_user.id,
+        notification_type="follow",
+    )
+
     db.commit()
     db.refresh(follow)
 

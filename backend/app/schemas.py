@@ -50,6 +50,9 @@ class TweetCreate(BaseModel):
         max_length=280
     )
 
+class HashtagResponse(BaseModel):
+    id: int
+    name: str
 
 class TweetResponse(BaseModel):
     id: int
@@ -62,6 +65,9 @@ class TweetResponse(BaseModel):
     like_count: int
     liked_by_me: bool
     comment_count: int
+    hashtags: list[HashtagResponse] =[]
+    repost_count: int
+    reposted_by_me: bool
 
 
 class TweetListResponse(BaseModel):
@@ -97,6 +103,26 @@ class UserTweetsResponse(BaseModel):
 
 
 # ============================================================
+# USER SEARCH
+# ============================================================
+
+class UserSearchResponse(BaseModel):
+    id: int
+    username: str
+    created_at: datetime
+    followers_count: int
+    following: bool
+
+
+class UserSearchListResponse(BaseModel):
+    users: list[UserSearchResponse]
+    page: int
+    limit: int
+    total: int
+    has_next: bool
+
+
+# ============================================================
 # COMMENTS
 # ============================================================
 
@@ -106,23 +132,57 @@ class CommentCreate(BaseModel):
         max_length=500
     )
 
+    parent_comment_id: int | None = None
+
 
 class CommentResponse(BaseModel):
     id: int
     user_id: int
     username: str
     tweet_id: int
+
+    parent_comment_id: int | None
+
     text: str
+
     created_at: datetime
     updated_at: datetime
 
-    model_config = ConfigDict(
-        from_attributes=True
-    )
+    reply_count: int = 0
 
 
 class CommentListResponse(BaseModel):
     comments: list[CommentResponse]
+    page: int
+    limit: int
+    total: int
+    has_next: bool
+
+# ============================================================
+# NOTIFICATIONS
+# ============================================================
+
+class NotificationResponse(BaseModel):
+    id: int
+
+    # Who performed the action
+    actor_id: int
+    actor_username: str
+
+    # like / follow / comment / reply
+    type: str
+
+    tweet_id: int | None
+    comment_id: int | None
+
+    is_read: bool
+
+    created_at: datetime
+
+
+class NotificationListResponse(BaseModel):
+    notifications: list[NotificationResponse]
+
     page: int
     limit: int
     total: int

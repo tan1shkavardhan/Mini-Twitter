@@ -3,26 +3,29 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import Like, Tweet, User
+from app.models import Repost, Tweet, User
 from app.notification_utils import create_notification
 
 
 router = APIRouter(
     prefix="/tweets",
-    tags=["Likes"]
+    tags=["Reposts"]
 )
 
+
+# ============================================================
+# REPOST TWEET
+# ============================================================
 
 @router.post(
-    "/{tweet_id}/like",
+    "/{tweet_id}/repost",
     status_code=status.HTTP_201_CREATED
 )
-def like_tweet(
+def repost_tweet(
     tweet_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Check that tweet exists
     tweet = db.query(Tweet).filter(
         Tweet.id == tweet_id
     ).first()
@@ -33,75 +36,82 @@ def like_tweet(
             detail="Tweet not found"
         )
 
-    # Check whether user already liked it
-    existing_like = db.query(Like).filter(
-        Like.user_id == current_user.id,
-        Like.tweet_id == tweet_id
+    existing_repost = db.query(Repost).filter(
+        Repost.user_id == current_user.id,
+        Repost.tweet_id == tweet_id
     ).first()
 
-    if existing_like:
+    if existing_repost:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You already liked this tweet"
+            detail="You already reposted this tweet"
         )
 
-    like = Like(
+    repost = Repost(
         user_id=current_user.id,
         tweet_id=tweet_id
     )
 
-    db.add(like)
+    db.add(repost)
 
     create_notification(
-        db = db,
-        user_id = tweet.user_id,
-        actor_id = current_user.id,
-        notification_type="like",
+        db=db,
+        user_id=tweet.user_id,
+        actor_id=current_user.id,
+        notification_type="repost",
         tweet_id=tweet.id,
     )
 
     db.commit()
-    db.refresh(like)
+    db.refresh(repost)
 
     return {
-        "message": "Tweet liked successfully",
+        "message": "Tweet reposted successfully",
         "tweet_id": tweet_id,
-        "like_id": like.id
+        "repost_id": repost.id
     }
 
 
+# ============================================================
+# REMOVE REPOST
+# ============================================================
+
 @router.delete(
-    "/{tweet_id}/like"
+    "/{tweet_id}/repost"
 )
-def unlike_tweet(
+def remove_repost(
     tweet_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    like = db.query(Like).filter(
-        Like.user_id == current_user.id,
-        Like.tweet_id == tweet_id
+    repost = db.query(Repost).filter(
+        Repost.user_id == current_user.id,
+        Repost.tweet_id == tweet_id
     ).first()
 
-    if not like:
+    if not repost:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="You have not liked this tweet"
+            detail="You have not reposted this tweet"
         )
 
-    db.delete(like)
+    db.delete(repost)
     db.commit()
 
     return {
-        "message": "Tweet unliked successfully",
+        "message": "Repost removed successfully",
         "tweet_id": tweet_id
     }
 
 
+# ============================================================
+# GET REPOST COUNT
+# ============================================================
+
 @router.get(
-    "/{tweet_id}/likes"
+    "/{tweet_id}/reposts"
 )
-def get_tweet_likes(
+def get_repost_count(
     tweet_id: int,
     db: Session = Depends(get_db)
 ):
@@ -115,11 +125,11 @@ def get_tweet_likes(
             detail="Tweet not found"
         )
 
-    like_count = db.query(Like).filter(
-        Like.tweet_id == tweet_id
+    repost_count = db.query(Repost).filter(
+        Repost.tweet_id == tweet_id
     ).count()
 
     return {
         "tweet_id": tweet_id,
-        "like_count": like_count
+        "repost_count": repost_count
     }

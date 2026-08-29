@@ -1,6 +1,7 @@
 import os
 import uuid
 import io
+import re
 
 from fastapi import (
     APIRouter,
@@ -23,8 +24,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import Comment, Like, Tweet, User
+from app.models import Comment, Hashtag, Like, Tweet, User
 from app.schemas import (
+    HashtagResponse,
     TweetCreate,
     TweetListResponse,
     TweetResponse
@@ -223,6 +225,57 @@ def save_image(photo: UploadFile) -> str:
 
     return file_path
 
+
+# ============================================================
+# HASHTAG HELPERS
+# ============================================================
+
+def extract_hashtags(text: str) -> list[str]:
+    hashtags = re.findall(
+        r"#([A-Za-z0-9_]+)",
+        text
+    )
+
+    # Remove duplicates and normalize to lowercase
+    return list(
+        dict.fromkeys(
+            hashtag.lower()
+            for hashtag in hashtags
+        )
+    )
+
+
+def sync_tweet_hashtags(
+    db: Session,
+    tweet: Tweet,
+    text: str
+):
+    hashtag_names = extract_hashtags(text)
+
+    tweet.hashtags.clear()
+
+    for name in hashtag_names:
+
+        hashtag = (
+            db.query(Hashtag)
+            .filter(Hashtag.name == name)
+            .first()
+        )
+
+        if not hashtag:
+            hashtag = Hashtag(
+                name=name
+            )
+
+            db.add(hashtag)
+            db.flush()
+
+        tweet.hashtags.append(hashtag)
+
+# ============================================================
+# TWEET RESPONSE BUILDER
+# ============================================================
+
 # ============================================================
 # TWEET RESPONSE BUILDER
 # ============================================================
@@ -235,6 +288,14 @@ def build_tweet_response(
     comment_count: int
 ) -> TweetResponse:
 
+    hashtags = [
+        HashtagResponse(
+            id=hashtag.id,
+            name=hashtag.name
+        )
+        for hashtag in tweet.hashtags
+    ]
+
     return TweetResponse(
         id=tweet.id,
         user_id=tweet.user_id,
@@ -245,9 +306,9 @@ def build_tweet_response(
         updated_at=tweet.updated_at,
         like_count=like_count,
         liked_by_me=liked_by_me,
-        comment_count=comment_count
+        comment_count=comment_count,
+        hashtags=hashtags
     )
-
 
 # ============================================================
 # OPTIMIZED QUERY BUILDER
@@ -391,12 +452,20 @@ def create_tweet(
         photo_path = save_image(photo)
 
     tweet = Tweet(
-        text=text,
-        photo=photo_path,
-        user_id=current_user.id
-    )
+    text=text,
+    photo=photo_path,
+    user_id=current_user.id
+)
 
     db.add(tweet)
+
+    sync_tweet_hashtags(
+        db,
+        tweet,
+        text
+    )
+
+
     db.commit()
     db.refresh(tweet)
 
@@ -599,6 +668,12 @@ def update_tweet(
         )
 
     tweet.text = text
+
+    sync_tweet_hashtags(
+        db,
+        tweet,
+        text
+    )
 
     db.commit()
     db.refresh(tweet)

@@ -6,7 +6,9 @@ from app.dependencies import get_current_user
 from app.models import Follow, Tweet, User
 from app.schemas import (
     UserProfileResponse,
-    UserTweetsResponse
+    UserTweetsResponse,
+    UserSearchResponse,
+    UserSearchListResponse
 )
 
 from routers.tweets import (
@@ -19,6 +21,103 @@ router = APIRouter(
     prefix="/users",
     tags=["Users"]
 )
+
+
+# ============================================================
+# SEARCH USERS
+# ============================================================
+
+@router.get(
+    "/search",
+    response_model=UserSearchListResponse
+)
+def search_users(
+    q: str = Query(
+        ...,
+        min_length=1,
+        max_length=50
+    ),
+    page: int = Query(
+        default=1,
+        ge=1
+    ),
+    limit: int = Query(
+        default=10,
+        ge=1,
+        le=50
+    ),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+
+    search_term = q.strip()
+
+    if not search_term:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Search query cannot be empty"
+        )
+
+    query = (
+        db.query(User)
+        .filter(
+            User.username.ilike(
+                f"%{search_term}%"
+            )
+        )
+    )
+
+    total = query.count()
+
+    offset = (page - 1) * limit
+
+    users = (
+        query
+        .order_by(User.username.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    user_data = []
+
+    for user in users:
+
+        followers_count = (
+            db.query(Follow)
+            .filter(
+                Follow.following_id == user.id
+            )
+            .count()
+        )
+
+        following = (
+            db.query(Follow)
+            .filter(
+                Follow.follower_id == current_user.id,
+                Follow.following_id == user.id
+            )
+            .first()
+            is not None
+        )
+
+        user_data.append(
+            UserSearchResponse(
+                id=user.id,
+                username=user.username,
+                created_at=user.created_at,
+                followers_count=followers_count,
+                following=following
+            )
+        )
+
+    return UserSearchListResponse(
+        users=user_data,
+        page=page,
+        limit=limit,
+        total=total,
+        has_next=(page * limit) < total
+    )
 
 
 # ============================================================
