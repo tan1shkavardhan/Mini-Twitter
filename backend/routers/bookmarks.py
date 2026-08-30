@@ -127,7 +127,12 @@ def get_my_bookmarks(
                 like.user_id == current_user.id
                 for like in tweet.likes
             ),
-            comment_count=len(tweet.comments)
+            comment_count=len(tweet.comments),
+            repost_count=len(tweet.reposts),
+            reposted_by_me=any(
+                repost.user_id == current_user.id
+                for repost in tweet.reposts
+            )
         )
         for tweet, username in results
     ]

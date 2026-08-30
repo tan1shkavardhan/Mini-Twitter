@@ -1,7 +1,7 @@
-import os
-import uuid
 import io
+import os
 import re
+import uuid
 
 from fastapi import (
     APIRouter,
@@ -14,25 +14,35 @@ from fastapi import (
     status
 )
 
+from PIL import Image, UnidentifiedImageError
+
 from sqlalchemy import (
     and_,
     exists,
     func,
     or_
 )
+
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import Comment, Hashtag, Like, Tweet, User
+
+from app.models import (
+    Comment,
+    Hashtag,
+    Like,
+    Repost,
+    Tweet,
+    User
+)
+
 from app.schemas import (
     HashtagResponse,
     TweetCreate,
     TweetListResponse,
     TweetResponse
 )
-
-from PIL import Image, UnidentifiedImageError
 
 
 # ============================================================
@@ -68,24 +78,14 @@ router = APIRouter(
 # ============================================================
 # IMAGE HANDLING
 # ============================================================
-def save_image(photo: UploadFile) -> str:
-    """
-    Validate and safely save an uploaded image.
-    """
 
-    # --------------------------------------------------------
-    # CONTENT TYPE
-    # --------------------------------------------------------
+def save_image(photo: UploadFile) -> str:
 
     if photo.content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only JPEG, PNG and WebP images are allowed"
         )
-
-    # --------------------------------------------------------
-    # FILE EXTENSION
-    # --------------------------------------------------------
 
     extension = os.path.splitext(
         photo.filename or ""
@@ -96,10 +96,6 @@ def save_image(photo: UploadFile) -> str:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Allowed image extensions: .jpg, .jpeg, .png, .webp"
         )
-
-    # --------------------------------------------------------
-    # READ FILE
-    # --------------------------------------------------------
 
     try:
 
@@ -117,7 +113,6 @@ def save_image(photo: UploadFile) -> str:
 
             total_size += len(chunk)
 
-            # Maximum size check
             if total_size > MAX_IMAGE_SIZE:
                 raise HTTPException(
                     status_code=status.HTTP_413_CONTENT_TOO_LARGE,
@@ -126,7 +121,6 @@ def save_image(photo: UploadFile) -> str:
 
             file_data.extend(chunk)
 
-        # Empty file
         if total_size == 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -136,17 +130,14 @@ def save_image(photo: UploadFile) -> str:
     finally:
         photo.file.close()
 
-    # --------------------------------------------------------
-    # ACTUAL IMAGE VALIDATION
-    # --------------------------------------------------------
-
     try:
 
         image = Image.open(
             io.BytesIO(file_data)
         )
 
-        # Verify actual image structure
+        detected_format = image.format
+
         image.verify()
 
     except (
@@ -154,15 +145,10 @@ def save_image(photo: UploadFile) -> str:
         OSError,
         SyntaxError
     ):
-
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Uploaded file is not a valid image"
         )
-
-    # --------------------------------------------------------
-    # VERIFY IMAGE FORMAT
-    # --------------------------------------------------------
 
     format_to_content_type = {
         "JPEG": "image/jpeg",
@@ -171,7 +157,7 @@ def save_image(photo: UploadFile) -> str:
     }
 
     detected_content_type = format_to_content_type.get(
-        image.format
+        detected_format
     )
 
     if detected_content_type != photo.content_type:
@@ -180,18 +166,10 @@ def save_image(photo: UploadFile) -> str:
             detail="File content does not match its declared type"
         )
 
-    # --------------------------------------------------------
-    # CREATE SAFE UPLOAD DIRECTORY
-    # --------------------------------------------------------
-
     os.makedirs(
         "uploads",
         exist_ok=True
     )
-
-    # --------------------------------------------------------
-    # GENERATE SAFE FILENAME
-    # --------------------------------------------------------
 
     filename = f"{uuid.uuid4()}{extension}"
 
@@ -200,17 +178,12 @@ def save_image(photo: UploadFile) -> str:
         filename
     )
 
-    # --------------------------------------------------------
-    # SAVE FILE
-    # --------------------------------------------------------
-
     try:
 
         with open(
             file_path,
             "wb"
         ) as buffer:
-
             buffer.write(file_data)
 
     except Exception:
@@ -227,16 +200,18 @@ def save_image(photo: UploadFile) -> str:
 
 
 # ============================================================
-# HASHTAG HELPERS
+# HASHTAGS
 # ============================================================
 
-def extract_hashtags(text: str) -> list[str]:
+def extract_hashtags(
+    text: str
+) -> list[str]:
+
     hashtags = re.findall(
         r"#([A-Za-z0-9_]+)",
         text
     )
 
-    # Remove duplicates and normalize to lowercase
     return list(
         dict.fromkeys(
             hashtag.lower()
@@ -249,8 +224,11 @@ def sync_tweet_hashtags(
     db: Session,
     tweet: Tweet,
     text: str
-):
-    hashtag_names = extract_hashtags(text)
+) -> None:
+
+    hashtag_names = extract_hashtags(
+        text
+    )
 
     tweet.hashtags.clear()
 
@@ -258,11 +236,14 @@ def sync_tweet_hashtags(
 
         hashtag = (
             db.query(Hashtag)
-            .filter(Hashtag.name == name)
+            .filter(
+                Hashtag.name == name
+            )
             .first()
         )
 
         if not hashtag:
+
             hashtag = Hashtag(
                 name=name
             )
@@ -270,14 +251,13 @@ def sync_tweet_hashtags(
             db.add(hashtag)
             db.flush()
 
-        tweet.hashtags.append(hashtag)
+        tweet.hashtags.append(
+            hashtag
+        )
+
 
 # ============================================================
-# TWEET RESPONSE BUILDER
-# ============================================================
-
-# ============================================================
-# TWEET RESPONSE BUILDER
+# RESPONSE BUILDER
 # ============================================================
 
 def build_tweet_response(
@@ -285,7 +265,9 @@ def build_tweet_response(
     username: str,
     like_count: int,
     liked_by_me: bool,
-    comment_count: int
+    comment_count: int,
+    repost_count: int,
+    reposted_by_me: bool
 ) -> TweetResponse:
 
     hashtags = [
@@ -304,32 +286,34 @@ def build_tweet_response(
         photo=tweet.photo,
         created_at=tweet.created_at,
         updated_at=tweet.updated_at,
+
         like_count=like_count,
         liked_by_me=liked_by_me,
+
         comment_count=comment_count,
-        hashtags=hashtags
+
+        hashtags=hashtags,
+
+        repost_count=repost_count,
+        reposted_by_me=reposted_by_me
     )
 
+
 # ============================================================
-# OPTIMIZED QUERY BUILDER
+# OPTIMIZED TWEET QUERY
 # ============================================================
 
 def get_tweet_query(
     db: Session,
     current_user_id: int
 ):
-    """
-    Build an optimized tweet query.
-
-    Instead of querying likes/comments separately
-    for every tweet, calculate everything inside
-    the main SQL query.
-    """
 
     like_count_subquery = (
         db.query(
             Like.tweet_id,
-            func.count(Like.id).label("like_count")
+            func.count(Like.id).label(
+                "like_count"
+            )
         )
         .group_by(
             Like.tweet_id
@@ -340,10 +324,25 @@ def get_tweet_query(
     comment_count_subquery = (
         db.query(
             Comment.tweet_id,
-            func.count(Comment.id).label("comment_count")
+            func.count(Comment.id).label(
+                "comment_count"
+            )
         )
         .group_by(
             Comment.tweet_id
+        )
+        .subquery()
+    )
+
+    repost_count_subquery = (
+        db.query(
+            Repost.tweet_id,
+            func.count(Repost.id).label(
+                "repost_count"
+            )
+        )
+        .group_by(
+            Repost.tweet_id
         )
         .subquery()
     )
@@ -355,6 +354,13 @@ def get_tweet_query(
         )
     )
 
+    reposted_by_me_subquery = exists().where(
+        and_(
+            Repost.tweet_id == Tweet.id,
+            Repost.user_id == current_user_id
+        )
+    )
+
     query = (
         db.query(
             Tweet,
@@ -363,15 +369,30 @@ def get_tweet_query(
             func.coalesce(
                 like_count_subquery.c.like_count,
                 0
-            ).label("like_count"),
+            ).label(
+                "like_count"
+            ),
 
             func.coalesce(
                 comment_count_subquery.c.comment_count,
                 0
-            ).label("comment_count"),
+            ).label(
+                "comment_count"
+            ),
+
+            func.coalesce(
+                repost_count_subquery.c.repost_count,
+                0
+            ).label(
+                "repost_count"
+            ),
 
             liked_by_me_subquery.label(
                 "liked_by_me"
+            ),
+
+            reposted_by_me_subquery.label(
+                "reposted_by_me"
             )
         )
         .join(
@@ -386,13 +407,17 @@ def get_tweet_query(
             comment_count_subquery,
             comment_count_subquery.c.tweet_id == Tweet.id
         )
+        .outerjoin(
+            repost_count_subquery,
+            repost_count_subquery.c.tweet_id == Tweet.id
+        )
     )
 
     return query
 
 
 # ============================================================
-# CONVERT QUERY RESULT
+# QUERY RESULT → RESPONSE
 # ============================================================
 
 def make_tweet_response(
@@ -404,7 +429,9 @@ def make_tweet_response(
         username,
         like_count,
         comment_count,
-        liked_by_me
+        repost_count,
+        liked_by_me,
+        reposted_by_me
     ) = result
 
     return build_tweet_response(
@@ -412,7 +439,9 @@ def make_tweet_response(
         username=username,
         like_count=like_count,
         liked_by_me=bool(liked_by_me),
-        comment_count=comment_count
+        comment_count=comment_count,
+        repost_count=repost_count,
+        reposted_by_me=bool(reposted_by_me)
     )
 
 
@@ -449,13 +478,15 @@ def create_tweet(
     photo_path = None
 
     if photo:
-        photo_path = save_image(photo)
+        photo_path = save_image(
+            photo
+        )
 
     tweet = Tweet(
-    text=text,
-    photo=photo_path,
-    user_id=current_user.id
-)
+        text=text,
+        photo=photo_path,
+        user_id=current_user.id
+    )
 
     db.add(tweet)
 
@@ -465,7 +496,6 @@ def create_tweet(
         text
     )
 
-
     db.commit()
     db.refresh(tweet)
 
@@ -474,7 +504,9 @@ def create_tweet(
         username=current_user.username,
         like_count=0,
         liked_by_me=False,
-        comment_count=0
+        comment_count=0,
+        repost_count=0,
+        reposted_by_me=False
     )
 
 
@@ -487,8 +519,15 @@ def create_tweet(
     response_model=TweetListResponse
 )
 def get_tweets(
-    page: int = Query(default=1, ge=1),
-    limit: int = Query(default=10, ge=1, le=50),
+    page: int = Query(
+        default=1,
+        ge=1
+    ),
+    limit: int = Query(
+        default=10,
+        ge=1,
+        le=50
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -513,7 +552,9 @@ def get_tweets(
     )
 
     tweet_data = [
-        make_tweet_response(result)
+        make_tweet_response(
+            result
+        )
         for result in results
     ]
 
@@ -535,9 +576,20 @@ def get_tweets(
     response_model=TweetListResponse
 )
 def search_tweets(
-    q: str = Query(..., min_length=1, max_length=100),
-    page: int = Query(default=1, ge=1),
-    limit: int = Query(default=10, ge=1, le=50),
+    q: str = Query(
+        ...,
+        min_length=1,
+        max_length=100
+    ),
+    page: int = Query(
+        default=1,
+        ge=1
+    ),
+    limit: int = Query(
+        default=10,
+        ge=1,
+        le=50
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -552,13 +604,20 @@ def search_tweets(
 
     search_pattern = f"%{search_term}%"
 
-    query = get_tweet_query(
-        db,
-        current_user.id
-    ).filter(
-        or_(
-            Tweet.text.ilike(search_pattern),
-            User.username.ilike(search_pattern)
+    query = (
+        get_tweet_query(
+            db,
+            current_user.id
+        )
+        .filter(
+            or_(
+                Tweet.text.ilike(
+                    search_pattern
+                ),
+                User.username.ilike(
+                    search_pattern
+                )
+            )
         )
     )
 
@@ -577,7 +636,9 @@ def search_tweets(
     )
 
     tweet_data = [
-        make_tweet_response(result)
+        make_tweet_response(
+            result
+        )
         for result in results
     ]
 
@@ -604,11 +665,14 @@ def get_tweet(
     current_user: User = Depends(get_current_user)
 ):
 
-    query = get_tweet_query(
-        db,
-        current_user.id
-    ).filter(
-        Tweet.id == tweet_id
+    query = (
+        get_tweet_query(
+            db,
+            current_user.id
+        )
+        .filter(
+            Tweet.id == tweet_id
+        )
     )
 
     result = query.first()
@@ -619,7 +683,9 @@ def get_tweet(
             detail="Tweet not found"
         )
 
-    return make_tweet_response(result)
+    return make_tweet_response(
+        result
+    )
 
 
 # ============================================================
@@ -637,9 +703,13 @@ def update_tweet(
     current_user: User = Depends(get_current_user)
 ):
 
-    tweet = db.query(Tweet).filter(
-        Tweet.id == tweet_id
-    ).first()
+    tweet = (
+        db.query(Tweet)
+        .filter(
+            Tweet.id == tweet_id
+        )
+        .first()
+    )
 
     if not tweet:
         raise HTTPException(
@@ -678,16 +748,21 @@ def update_tweet(
     db.commit()
     db.refresh(tweet)
 
-    query = get_tweet_query(
-        db,
-        current_user.id
-    ).filter(
-        Tweet.id == tweet.id
+    query = (
+        get_tweet_query(
+            db,
+            current_user.id
+        )
+        .filter(
+            Tweet.id == tweet.id
+        )
     )
 
     result = query.first()
 
-    return make_tweet_response(result)
+    return make_tweet_response(
+        result
+    )
 
 
 # ============================================================
@@ -704,9 +779,13 @@ def delete_tweet(
     current_user: User = Depends(get_current_user)
 ):
 
-    tweet = db.query(Tweet).filter(
-        Tweet.id == tweet_id
-    ).first()
+    tweet = (
+        db.query(Tweet)
+        .filter(
+            Tweet.id == tweet_id
+        )
+        .first()
+    )
 
     if not tweet:
         raise HTTPException(

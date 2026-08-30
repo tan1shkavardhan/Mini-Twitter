@@ -12,7 +12,9 @@ class UserCreate(BaseModel):
         min_length=3,
         max_length=50
     )
+
     email: str
+
     password: str = Field(
         min_length=8,
         max_length=100
@@ -50,9 +52,11 @@ class TweetCreate(BaseModel):
         max_length=280
     )
 
+
 class HashtagResponse(BaseModel):
     id: int
     name: str
+
 
 class TweetResponse(BaseModel):
     id: int
@@ -62,10 +66,14 @@ class TweetResponse(BaseModel):
     photo: str | None
     created_at: datetime
     updated_at: datetime
+
     like_count: int
     liked_by_me: bool
+
     comment_count: int
-    hashtags: list[HashtagResponse] =[]
+
+    hashtags: list[HashtagResponse] = []
+
     repost_count: int
     reposted_by_me: bool
 
@@ -87,15 +95,18 @@ class UserProfileResponse(BaseModel):
     username: str
     email: str
     created_at: datetime
+
     tweet_count: int
     followers_count: int
     following_count: int
+
     following: bool
 
 
 class UserTweetsResponse(BaseModel):
     username: str
     tweets: list[TweetResponse]
+
     page: int
     limit: int
     total: int
@@ -110,12 +121,14 @@ class UserSearchResponse(BaseModel):
     id: int
     username: str
     created_at: datetime
+
     followers_count: int
     following: bool
 
 
 class UserSearchListResponse(BaseModel):
     users: list[UserSearchResponse]
+
     page: int
     limit: int
     total: int
@@ -153,10 +166,12 @@ class CommentResponse(BaseModel):
 
 class CommentListResponse(BaseModel):
     comments: list[CommentResponse]
+
     page: int
     limit: int
     total: int
     has_next: bool
+
 
 # ============================================================
 # NOTIFICATIONS
@@ -165,11 +180,9 @@ class CommentListResponse(BaseModel):
 class NotificationResponse(BaseModel):
     id: int
 
-    # Who performed the action
     actor_id: int
     actor_username: str
 
-    # like / follow / comment / reply
     type: str
 
     tweet_id: int | None
