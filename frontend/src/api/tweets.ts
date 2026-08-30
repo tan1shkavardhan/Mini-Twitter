@@ -1,4 +1,4 @@
-import { apiRequest } from "./client";
+import api from "./client";
 
 export interface Tweet {
   id: number;
@@ -7,10 +7,16 @@ export interface Tweet {
   text: string;
   photo: string | null;
   created_at: string;
-  updated_at: string | null;
+  updated_at: string;
   like_count: number;
   liked_by_me: boolean;
   comment_count: number;
+  hashtags: {
+    id: number;
+    name: string;
+  }[];
+  repost_count?: number;
+  reposted_by_me?: boolean;
 }
 
 export interface TweetListResponse {
@@ -21,19 +27,18 @@ export interface TweetListResponse {
   has_next: boolean;
 }
 
-export async function getTweets(
-  page = 1,
-  limit = 10
-): Promise<TweetListResponse> {
-  return apiRequest(
-    `/tweets/?page=${page}&limit=${limit}`
+export const getTweets = async () => {
+  const response = await api.get<TweetListResponse>(
+    "/tweets/?page=1&limit=20"
   );
-}
 
-export async function createTweet(
+  return response.data;
+};
+
+export const createTweet = async (
   text: string,
-  photo?: File
-): Promise<Tweet> {
+  photo?: File | null
+) => {
   const formData = new FormData();
 
   formData.append("text", text);
@@ -42,42 +47,26 @@ export async function createTweet(
     formData.append("photo", photo);
   }
 
-  return apiRequest("/tweets/", {
-    method: "POST",
-    body: formData,
-  });
-}
+  const response = await api.post<Tweet>(
+    "/tweets/",
+    formData
+  );
 
-export async function updateTweet(
-  tweetId: number,
-  text: string
-): Promise<Tweet> {
-  return apiRequest(`/tweets/${tweetId}`, {
-    method: "PUT",
-    body: JSON.stringify({ text }),
-  });
-}
+  return response.data;
+};
 
-export async function deleteTweet(
-  tweetId: number
-): Promise<void> {
-  await apiRequest(`/tweets/${tweetId}`, {
-    method: "DELETE",
-  });
-}
+export const likeTweet = async (tweetId: number) => {
+  const response = await api.post(
+    `/tweets/${tweetId}/like`
+  );
 
-export async function likeTweet(
-  tweetId: number
-) {
-  return apiRequest(`/tweets/${tweetId}/like`, {
-    method: "POST",
-  });
-}
+  return response.data;
+};
 
-export async function unlikeTweet(
-  tweetId: number
-) {
-  return apiRequest(`/tweets/${tweetId}/like`, {
-    method: "DELETE",
-  });
-}
+export const unlikeTweet = async (tweetId: number) => {
+  const response = await api.delete(
+    `/tweets/${tweetId}/like`
+  );
+
+  return response.data;
+};
